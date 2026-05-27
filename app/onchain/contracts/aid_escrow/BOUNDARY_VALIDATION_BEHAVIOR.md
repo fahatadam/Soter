@@ -28,15 +28,16 @@ The onchain contract enforces the following timing rules:
   - Must respect `config.max_expires_in` if configured
 - **Claim Validation**: Claim attempts where `expires_at > 0 && now > expires_at` trigger auto-expiry
 
-#### 3. Auto-Expiry Logic
+#### 3. Late Claim Behavior
 
-**Critical Behavior**: When a claim is attempted after expiry, the contract **automatically updates** the package status to `Expired` before returning the error.
+**Important**: When a claim is attempted after expiry, the contract returns an error but does **NOT** automatically update the package status to `Expired`. The package status remains `Created`.
 
 - **Trigger**: Any claim attempt (`claim()` or `claim_with_proof()`) where `expires_at > 0 && now > expires_at`
-- **State Change**: Package status transitions from `Created` to `Expired`
+- **State Change**: Package status remains `Created` (no automatic transition)
 - **Error Returned**: `Error::PackageExpired`
-- **Persistence**: The status change is permanent; even if time is reverted, the package remains `Expired`
-- **Subsequent Attempts**: Any further claim attempts will return `Error::PackageNotActive` (since status is no longer `Created`)
+- **Persistence**: Since status doesn't change, if time is reverted, the package can still be claimed
+- **Subsequent Attempts**: Further claim attempts will continue to return `Error::PackageExpired` as long as `now > expires_at`
+- **Status Transition**: Package status only transitions to `Expired` through other operations (e.g., `refund()` can transition a `Created` package to `Expired`)
 
 ### Boundary Conditions
 
@@ -54,8 +55,8 @@ The onchain contract enforces the following timing rules:
 |----------|-----------|-----------------|
 | Claim 1 second before `expires_at` | `expires_at - 1` | Success, status becomes `Claimed` |
 | Claim at exact `expires_at` | `expires_at` | Success, status becomes `Claimed` |
-| Claim 1 second after `expires_at` | `expires_at + 1` | `Error::PackageExpired`, status auto-updates to `Expired` |
-| Claim long after `expires_at` | `expires_at + 1000` | `Error::PackageExpired`, status auto-updates to `Expired` |
+| Claim 1 second after `expires_at` | `expires_at + 1` | `Error::PackageExpired`, status remains `Created` |
+| Claim long after `expires_at` | `expires_at + 1000` | `Error::PackageExpired`, status remains `Created` |
 
 #### Combined Boundaries (claim_starts_at == expires_at)
 
@@ -63,13 +64,14 @@ The onchain contract enforces the following timing rules:
 |----------|-----------|-----------------|
 | Claim before boundary | `boundary - 1` | `Error::ClaimTooEarly`, status remains `Created` |
 | Claim at exact boundary | `boundary` | Success, status becomes `Claimed` |
-| Claim after boundary | `boundary + 1` | `Error::PackageExpired`, status auto-updates to `Expired` |
+| Claim after boundary | `boundary + 1` | `Error::PackageExpired`, status remains `Created` |
 
 ### Edge Cases
 
 1. **Zero Expiry (`expires_at = 0`)**: Package never expires, can be claimed at any time after `claim_starts_at`
 2. **Zero Claim Window (`claim_starts_at == expires_at`)**: Valid configuration, claim only succeeds at exact boundary timestamp
-3. **Invalid Configurations Rejected at Creation**:
+3. **Late Claim Retry**: Since package status remains `Created` after a late claim attempt, if the ledger time is reverted to within the claim window, the claim can succeed
+4. **Invalid Configurations Rejected at Creation**:
    - `claim_starts_at < created_at` → `Error::InvalidState`
    - `claim_starts_at > expires_at` → `Error::InvalidState`
 

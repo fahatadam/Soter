@@ -223,7 +223,7 @@ mod expiry_boundaries {
     }
 
     #[test]
-    fn fails_when_claimed_1_second_after_expiry_with_auto_expire() {
+    fn fails_when_claimed_1_second_after_expiry() {
         let t = TestSetup::new();
         let recipient = Address::generate(&t.env);
         let now = t.now();
@@ -237,13 +237,13 @@ mod expiry_boundaries {
         let result = t.client.try_claim(&id);
         assert_eq!(result, Err(Ok(Error::PackageExpired)));
 
-        // Verify package status is auto-updated to Expired
+        // Verify package status remains Created (not auto-updated)
         let pkg = t.client.get_package(&id);
-        assert_eq!(pkg.status, PackageStatus::Expired);
+        assert_eq!(pkg.status, PackageStatus::Created);
     }
 
     #[test]
-    fn fails_when_claimed_long_after_expiry_with_auto_expire() {
+    fn fails_when_claimed_long_after_expiry() {
         let t = TestSetup::new();
         let recipient = Address::generate(&t.env);
         let now = t.now();
@@ -257,9 +257,9 @@ mod expiry_boundaries {
         let result = t.client.try_claim(&id);
         assert_eq!(result, Err(Ok(Error::PackageExpired)));
 
-        // Verify package status is auto-updated to Expired
+        // Verify package status remains Created (not auto-updated)
         let pkg = t.client.get_package(&id);
-        assert_eq!(pkg.status, PackageStatus::Expired);
+        assert_eq!(pkg.status, PackageStatus::Created);
     }
 }
 
@@ -325,9 +325,9 @@ mod combined_boundaries {
         let result = t.client.try_claim(&id);
         assert_eq!(result, Err(Ok(Error::PackageExpired)));
 
-        // Verify package status is auto-updated to Expired
+        // Verify package status remains Created (not auto-updated)
         let pkg = t.client.get_package(&id);
-        assert_eq!(pkg.status, PackageStatus::Expired);
+        assert_eq!(pkg.status, PackageStatus::Created);
     }
 
     #[test]
@@ -389,14 +389,14 @@ mod combined_boundaries {
 }
 
 // ===========================================================================
-// Auto-Expiry Behavior Tests
+// Late Claim Behavior Tests
 // ===========================================================================
 
-mod auto_expiry_behavior {
+mod late_claim_behavior {
     use super::*;
 
     #[test]
-    fn package_status_auto_expires_on_first_late_claim_attempt() {
+    fn late_claim_returns_error_but_status_remains_created() {
         let t = TestSetup::new();
         let recipient = Address::generate(&t.env);
         let now = t.now();
@@ -408,25 +408,25 @@ mod auto_expiry_behavior {
         // Advance past expiry
         t.set_timestamp(expires_at + 10);
 
-        // First late claim attempt - should auto-expire
+        // First late claim attempt - should fail with PackageExpired
         let result1 = t.client.try_claim(&id);
         assert_eq!(result1, Err(Ok(Error::PackageExpired)));
 
-        // Verify status is now Expired
+        // Verify status remains Created (not auto-updated)
         let pkg1 = t.client.get_package(&id);
-        assert_eq!(pkg1.status, PackageStatus::Expired);
+        assert_eq!(pkg1.status, PackageStatus::Created);
 
         // Second late claim attempt - should still fail with PackageExpired
         let result2 = t.client.try_claim(&id);
         assert_eq!(result2, Err(Ok(Error::PackageExpired)));
 
-        // Verify status remains Expired
+        // Verify status still remains Created
         let pkg2 = t.client.get_package(&id);
-        assert_eq!(pkg2.status, PackageStatus::Expired);
+        assert_eq!(pkg2.status, PackageStatus::Created);
     }
 
     #[test]
-    fn auto_expired_package_cannot_be_claimed_even_if_time_reverted() {
+    fn late_claim_can_be_retried_if_time_reverted() {
         let t = TestSetup::new();
         let recipient = Address::generate(&t.env);
         let now = t.now();
@@ -435,29 +435,29 @@ mod auto_expiry_behavior {
 
         let id = t.create_package_with_timing(&recipient, ONE_TOKEN, claim_starts_at, expires_at);
 
-        // Advance past expiry and claim to trigger auto-expiry
+        // Advance past expiry and claim
         t.set_timestamp(expires_at + 10);
         let result1 = t.client.try_claim(&id);
         assert_eq!(result1, Err(Ok(Error::PackageExpired)));
 
-        // Verify status is Expired
+        // Verify status remains Created
         let pkg1 = t.client.get_package(&id);
-        assert_eq!(pkg1.status, PackageStatus::Expired);
+        assert_eq!(pkg1.status, PackageStatus::Created);
 
         // Revert time back to within claim window
         t.set_timestamp(claim_starts_at + 50);
 
-        // Should still fail because status is already Expired
+        // Should succeed because status is still Created
         let result2 = t.client.try_claim(&id);
-        assert_eq!(result2, Err(Ok(Error::PackageNotActive)));
+        assert!(result2.is_ok());
 
-        // Verify status remains Expired
+        // Verify status is now Claimed
         let pkg2 = t.client.get_package(&id);
-        assert_eq!(pkg2.status, PackageStatus::Expired);
+        assert_eq!(pkg2.status, PackageStatus::Claimed);
     }
 
     #[test]
-    fn claim_with_proof_also_auto_expires_on_late_attempt() {
+    fn claim_with_proof_fails_after_expiry() {
         let t = TestSetup::new();
         let recipient = Address::generate(&t.env);
         let now = t.now();
@@ -469,14 +469,14 @@ mod auto_expiry_behavior {
         // Advance past expiry
         t.set_timestamp(expires_at + 10);
 
-        // Try claim_with_proof after expiry - should auto-expire
+        // Try claim_with_proof after expiry - should fail
         let proof: Vec<soroban_sdk::String> = Vec::new(&t.env);
         let result = t.client.try_claim_with_proof(&id, &recipient, &proof);
         assert_eq!(result, Err(Ok(Error::PackageExpired)));
 
-        // Verify status is auto-updated to Expired
+        // Verify status remains Created (not auto-updated)
         let pkg = t.client.get_package(&id);
-        assert_eq!(pkg.status, PackageStatus::Expired);
+        assert_eq!(pkg.status, PackageStatus::Created);
     }
 }
 
